@@ -1,0 +1,53 @@
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: sample-api-green
+  labels:
+    app: sample-api
+    color: green
+spec:
+  replicas: 0
+  selector:
+    matchLabels:
+      app: sample-api
+      color: green
+  template:
+    metadata:
+      labels:
+        app: sample-api
+        color: green
+    spec:
+      containers:
+        - name: app
+          image: us-central1-docker.pkg.dev/PROJECT/REPO/sample-api:INITIAL
+          ports:
+            - containerPort: 8080
+          env:
+            - name: APP_NAME
+              value: "sample-api"
+            - name: COLOR
+              value: "green"
+            - name: ENV
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace
+          readinessProbe:
+            httpGet:
+              path: /actuator/health/readiness
+              port: 8080
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /actuator/health/liveness
+              port: 8080
+            initialDelaySeconds: 30
+            periodSeconds: 15
+          resources:
+            requests:
+              cpu: "200m"
+              memory: "256Mi"
+            limits:
+              cpu: "1"
+              memory: "512Mi"

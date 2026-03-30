@@ -1,0 +1,48 @@
+
+options:
+  logging: CLOUD_LOGGING_ONLY
+
+substitutions:
+  _SERVICE: "sample-api"
+
+steps:
+  - name: "maven:3.9-eclipse-temurin-17"
+    id: "unit-test"
+    entrypoint: "bash"
+    args:
+      - "-c"
+      - |
+        mvn -B clean test
+
+  - name: "returntocorp/semgrep:1.66.0"
+    id: "sast"
+    entrypoint: "bash"
+    args: ["-c", "semgrep --config=auto --error ."]
+
+  - name: "owasp/dependency-check:latest"
+    id: "sca"
+    entrypoint: "bash"
+    args:
+      - "-c"
+      - |
+        mkdir -p /workspace/reports/dependency-check
+        dependency-check.sh --scan . --format JSON --out /workspace/reports/dependency-check
+
+  - name: "zricethezav/gitleaks:v8.18.4"
+    id: "secret-scan"
+    entrypoint: "bash"
+    args: ["-c", "gitleaks detect --source . --no-git --verbose"]
+
+  - name: "openpolicyagent/conftest:v0.46.0"
+    id: "k8s-policy"
+    entrypoint: "bash"
+    args:
+      - "-c"
+      - |
+        conftest test k8s --policy policies/conftest
+
+artifacts:
+  objects:
+    location: "gs://${PROJECT_ID}-cicd-reports/${BUILD_ID}/pr"
+    paths:
+      - "reports/**"

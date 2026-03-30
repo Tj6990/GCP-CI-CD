@@ -1,0 +1,135 @@
+
+options:
+  logging: CLOUD_LOGGING_ONLY
+
+substitutions:
+  _SERVICE: "sample-api"
+  _REGION: "us-central1"             # Artifact Registry region
+  _AR_REPO: "my-ar-repo"             # Artifact Registry repository
+  _CLUSTER: "my-gke-cluster"         # Existing GKE cluster
+  _CLUSTER_REGION: "us-central1"     # GKE cluster location
+  _NAMESPACE: "dev"                  # Kubernetes namespace
+  _REPLICAS: "2"                     # desired replicas for active color
+
+steps:
+  # 1) Build & test
+  - name: "maven:3.9-eclipse-temurin-17"
+    id: "build-test"
+    entrypoint: "bash"
+    args: ["-c", "mvn -B clean test"]
+
+  # 2) SAST
+  - name: "returntocorp/semgrep:1.66.0"
+    id: "sast"
+    entrypoint: "bash"
+    args: ["-c", "semgrep --config=auto --error ."]
+
+  # 3) SCA
+  - name: "owasp/dependency-check:latest"
+    id: "sca"
+    entrypoint: "bash"
+    args:
+      - "-c"
+      - |
+        mkdir -p /workspace/reports/dependency-check
+        dependency-check.sh --scan . --format JSON --out /workspace/reports/dependency-check
+
+  # 4) Secret scan
+  - name: "zricethezav/gitleaks:v8.18.4"
+    id: "secret-scan"
+    entrypoint: "bash"
+    args: ["-c", "gitleaks detect --source . --no-git --verbose"]
+
+  # 5) Policy-as-code for K8s
+  - name: "openpolicyagent/conftest:v0.46.0"
+    id: "k8s-policy"
+    entrypoint: "bash"
+    args: ["-c", "conftest test k8s --policy policies/conftest"]
+
+  # 6) Build image
+  - name: "gcr.io/cloud-builders/docker"
+    id: "docker-build"
+    args:
+      - "build"
+      - "-t"
+      - "${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_AR_REPO}/${_SERVICE}:${SHORT_SHA}"
+      - "."
+
+  # 7) Push image
+  - name: "gcr.io/cloud-builders/docker"
+    id: "push"
+    args:
+      - "push"
+      - "${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_AR_REPO}/${_SERVICE}:${SHORT_SHA}"
+
+  # 8) Blue/Green deploy to GKE (deploy inactive color, smoke test, cutover)
+  - name: "gcr.io/google.com/cloudsdktool/cloud-sdk:slim"
+    id: "bluegreen-deploy"
+    entrypoint: "bash"
+    args:
+      - "-c"
+      - |
+        set -euo pipefail
+
+        APP="${_SERVICE}"
+        NS="${_NAMESPACE}"
+        CLUSTER="${_CLUSTER}"
+        LOC="${_CLUSTER_REGION}"
+        IMAGE="${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_AR_REPO}/${_SERVICE}:${SHORT_SHA}"
+        REPLICAS="${_REPLICAS}"
+
+        echo "Authenticating to GKE cluster ${CLUSTER} (${LOC})"
+        gcloud container clusters get-credentials "${CLUSTER}" --region "${LOC}" --project "${PROJECT_ID}"
+
+        echo "Ensuring namespace exists: ${NS}"
+        kubectl get ns "${NS}" >/dev/null 2>&1 || kubectl create ns "${NS}"
+
+        echo "Applying base manifests (deployments + services)"
+        kubectl -n "${NS}" apply -f k8s/base
+
+        # Determine current active color from ACTIVE service selector
+        ACTIVE_COLOR=$(kubectl -n "${NS}" get svc "${APP}" -o jsonpath='{.spec.selector.color}' 2>/dev/null || true)
+        if [ -z "${ACTIVE_COLOR}" ]; then
+          ACTIVE_COLOR="blue"
+        fi
+
+        if [ "${ACTIVE_COLOR}" = "blue" ]; then
+          INACTIVE_COLOR="green"
+        else
+          INACTIVE_COLOR="blue"
+        fi
+
+        echo "Active color: ${ACTIVE_COLOR} | Inactive (deploy target): ${INACTIVE_COLOR}"
+
+        # Update image on inactive Deployment
+        echo "Setting image for ${APP}-${INACTIVE_COLOR} to ${IMAGE}"
+        kubectl -n "${NS}" set image deployment/${APP}-${INACTIVE_COLOR} app="${IMAGE}" --record
+
+        # Scale inactive up (pre-warm)
+        echo "Scaling ${APP}-${INACTIVE_COLOR} to ${REPLICAS} replicas"
+        kubectl -n "${NS}" scale deployment/${APP}-${INACTIVE_COLOR} --replicas="${REPLICAS}"
+
+        # Point preview service to inactive color
+        echo "Pointing preview service ${APP}-preview to color=${INACTIVE_COLOR}"
+        kubectl -n "${NS}" patch svc "${APP}-preview" -p '{"spec":{"selector":{"app":"'"${APP}"'","color":"'"${INACTIVE_COLOR}"'"}}}'
+
+        echo "Waiting for rollout of inactive deployment"
+        kubectl -n "${NS}" rollout status deployment/${APP}-${INACTIVE_COLOR} --timeout=5m
+
+        echo "Running smoke test against preview service"
+        kubectl -n "${NS}" run smoke-${BUILD_ID} --rm -i --restart=Never --image=curlimages/curl:8.6.0               -- curl -fsS "http://${APP}-preview/actuator/health" | grep -q 'UP'
+
+        echo "Smoke test passed. Switching ACTIVE service to color=${INACTIVE_COLOR}"
+        kubectl -n "${NS}" patch svc "${APP}" -p '{"spec":{"selector":{"app":"'"${APP}"'","color":"'"${INACTIVE_COLOR}"'"}}}'
+
+        echo "Cutover done. Keeping old color (${ACTIVE_COLOR}) running for fast rollback."
+        echo "(Optional) To scale down old color later: kubectl -n ${NS} scale deploy/${APP}-${ACTIVE_COLOR} --replicas=0"
+
+artifacts:
+  objects:
+    location: "gs://${PROJECT_ID}-cicd-reports/${BUILD_ID}/release"
+    paths:
+      - "reports/**"
+
+images:
+  - "${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_AR_REPO}/${_SERVICE}:${SHORT_SHA}"
