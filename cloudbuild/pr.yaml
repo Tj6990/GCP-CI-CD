@@ -16,7 +16,7 @@ steps:
 
   - name: "returntocorp/semgrep:1.66.0"
     id: "sast"
-    entrypoint: "bash"
+    entrypoint: "sh"
     args: ["-c", "semgrep --config=p/java --severity=ERROR . || true"]
 
   - name: "owasp/dependency-check:latest"
