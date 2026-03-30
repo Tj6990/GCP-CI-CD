@@ -25,8 +25,12 @@ steps:
     args:
       - "-c"
       - |
-        mkdir -p /workspace/reports/dependency-check
-        dependency-check.sh --scan . --format JSON --out /workspace/reports/dependency-check
+        mkdir -p /tmp/reports/dependency-check
+        /usr/share/dependency-check/bin/dependency-check.sh \
+          --scan /workspace \
+          --format JSON \
+          --out /tmp/reports/dependency-check
+
 
   - name: "zricethezav/gitleaks:v8.18.4"
     id: "secret-scan"
