@@ -8,7 +8,7 @@ substitutions:
 steps:
   - name: "maven:3.9-eclipse-temurin-17"
     id: "unit-test"
-    entrypoint: "bash"
+    entrypoint: "sh"
     args:
       - "-c"
       - |
@@ -21,7 +21,7 @@ steps:
 
   - name: "owasp/dependency-check:latest"
     id: "sca"
-    entrypoint: "bash"
+    entrypoint: "sh"
     args:
       - "-c"
       - |
@@ -30,12 +30,12 @@ steps:
 
   - name: "zricethezav/gitleaks:v8.18.4"
     id: "secret-scan"
-    entrypoint: "bash"
+    entrypoint: "sh"
     args: ["-c", "gitleaks detect --source . --no-git --verbose"]
 
   - name: "openpolicyagent/conftest:v0.46.0"
     id: "k8s-policy"
-    entrypoint: "bash"
+    entrypoint: "sh"
     args:
       - "-c"
       - |
