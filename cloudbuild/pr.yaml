@@ -5,6 +5,11 @@ options:
 substitutions:
   _SERVICE: "sample-api"
 
+availableSecrets:
+  secretManager:
+    - versionName: projects/project-7bb6fee9-e074-47fb-bf6/secrets/nvd-api-key/versions/latest
+      env: NVD_API_KEY
+
 steps:
   - name: "maven:3.9-eclipse-temurin-17"
     id: "unit-test"
@@ -21,9 +26,9 @@ steps:
 
   - name: "owasp/dependency-check:latest"
     id: "sca"
-    entrypoint: "sh"
-    env:
-    - "NVD_API_KEY=${_NVD_API_KEY}"
+    entrypoint: "sh"    
+    secretEnv:
+        - NVD_API_KEY
     args:
       - "-c"
       - |
