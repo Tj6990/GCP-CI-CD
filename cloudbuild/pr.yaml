@@ -26,9 +26,9 @@ steps:
 
   - name: "owasp/dependency-check:latest"
     id: "sca"
-    entrypoint: "sh"    
+    entrypoint: "sh"
     secretEnv:
-        - NVD_API_KEY
+      - NVD_API_KEY
     args:
       - "-c"
       - |
@@ -38,6 +38,7 @@ steps:
           --format JSON \
           --out /tmp/reports/dependency-check \
           --nvdApiKey "$NVD_API_KEY"
+``
 
 
   - name: "zricethezav/gitleaks:v8.18.4"
