@@ -1,4 +1,3 @@
-
 options:
   logging: CLOUD_LOGGING_ONLY
 
@@ -22,7 +21,10 @@ steps:
   - name: "returntocorp/semgrep:1.66.0"
     id: "sast"
     entrypoint: "sh"
-    args: ["-c", "semgrep --config=p/java --severity=ERROR . || true"]
+    args:
+      - "-c"
+      - |
+        semgrep --config=p/java --severity=ERROR . || true
 
   - name: "owasp/dependency-check:latest"
     id: "sca"
@@ -42,7 +44,10 @@ steps:
   - name: "zricethezav/gitleaks:v8.18.4"
     id: "secret-scan"
     entrypoint: "sh"
-    args: ["-c", "gitleaks detect --source . --no-git --verbose"]
+    args:
+      - "-c"
+      - |
+        gitleaks detect --source . --no-git --verbose
 
   - name: "openpolicyagent/conftest:v0.46.0"
     id: "k8s-policy"
@@ -56,4 +61,4 @@ artifacts:
   objects:
     location: "gs://${PROJECT_ID}-cicd-reports/${BUILD_ID}/pr"
     paths:
-      - "reports/**"
+      - "/tmp/reports/**"
