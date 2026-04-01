@@ -39,7 +39,7 @@ steps:
           --scan /workspace \
           --format JSON \
           --out /tmp/reports/dependency-check \
-          --nvdApiKey "$NVD_API_KEY"
+          --nvdApiKey "$$NVD_API_KEY"
 
   - name: "zricethezav/gitleaks:v8.18.4"
     id: "secret-scan"
