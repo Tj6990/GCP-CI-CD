@@ -7,7 +7,7 @@ substitutions:
 
 availableSecrets:
   secretManager:
-    - versionName: projects/project-7bb6fee9-e074-47fb-bf6/secrets/nvd-api-key/versions/latest
+    - versionName: projects/340263268846/secrets/nvd-api-key/versions/latest
       env: NVD_API_KEY
 
 steps:
