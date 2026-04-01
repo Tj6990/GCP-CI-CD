@@ -70,6 +70,22 @@ steps:
         echo "Saving ODC cache to gs://$PROJECT_ID-odc-cache ..."
         gsutil -m rsync -r /tmp/odc-data gs://$PROJECT_ID-odc-cache || true
 
+  - name: "zricethezav/gitleaks:v8.18.4"
+    id: "secret-scan"
+    entrypoint: "sh"
+    args:
+      - "-c"
+      - |
+        gitleaks detect --source . --no-git --verbose
+
+  - name: "openpolicyagent/conftest:v0.46.0"
+    id: "k8s-policy"
+    entrypoint: "sh"
+    args:
+      - "-c"
+      - |
+        conftest test k8s --policy policies/conftest
+
 artifacts:
   objects:
     location: "gs://${PROJECT_ID}-cicd-reports/${BUILD_ID}/pr"
