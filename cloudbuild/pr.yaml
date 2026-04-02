@@ -112,4 +112,4 @@ artifacts:
   objects:
     location: "gs://${PROJECT_ID}-cicd-reports/${BUILD_ID}/pr"
     paths:
-      - "/tmp/reports/**"
+      - "/tmp/reports/*"

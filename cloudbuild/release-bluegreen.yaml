@@ -184,7 +184,7 @@ artifacts:
   objects:
     location: "gs://${PROJECT_ID}-cicd-reports/${BUILD_ID}/release"
     paths:
-      - "/tmp/reports/**"
+      - "/tmp/reports/*"
 
 images:
   - "${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_AR_REPO}/${_SERVICE}:${SHORT_SHA}"
