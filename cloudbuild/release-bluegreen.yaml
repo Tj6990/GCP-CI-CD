@@ -113,18 +113,18 @@ steps:
       - |
         set -euo pipefail
         APP="${_SERVICE}"
-        NS="${_NAMESPACE}"
+        NAMESPACE="${_NAMESPACE}"
         IMAGE="${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_AR_REPO}/${_SERVICE}:${SHORT_SHA}"
 
         gcloud container clusters get-credentials "${_CLUSTER}" --region "${_CLUSTER_REGION}"
 
-        ACTIVE_COLOR=$(kubectl -n "${NS}" get svc "${APP}" -o jsonpath='{.spec.selector.color}' || echo blue)
+        ACTIVE_COLOR=$(kubectl -n "${NAMESPACE}" get svc "${APP}" -o jsonpath='{.spec.selector.color}' || echo blue)
         [ "${ACTIVE_COLOR}" = "blue" ] && INACTIVE_COLOR="green" || INACTIVE_COLOR="blue"
 
-        kubectl -n "${NS}" set image deployment/${APP}-${INACTIVE_COLOR} app="${IMAGE}"
-        kubectl -n "${NS}" rollout status deployment/${APP}-${INACTIVE_COLOR} --timeout=5m
+        kubectl -n "${NAMESPACE}" set image deployment/${APP}-${INACTIVE_COLOR} app="${IMAGE}"
+        kubectl -n "${NAMESPACE}" rollout status deployment/${APP}-${INACTIVE_COLOR} --timeout=5m
 
-        kubectl -n "${NS}" patch svc "${APP}" \
+        kubectl -n "${NAMESPACE}" patch svc "${APP}" \
           -p '{"spec":{"selector":{"app":"'"${APP}"'","color":"'"${INACTIVE_COLOR}"'"}}}'
 
   # 10) Ensure README exists
