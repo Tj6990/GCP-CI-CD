@@ -86,6 +86,15 @@ steps:
       - |
         conftest test k8s --policy policies/conftest
 
+  - name: gcr.io/google.com/cloudsdktool/cloud-sdk:slim
+    id: ensure-report-bucket
+    entrypoint: sh
+    args:
+      - -c
+      - |
+        gsutil ls gs://${PROJECT_ID}-cicd-reports || \
+        gsutil mb -l us-central1 gs://${PROJECT_ID}-cicd-reports
+
 artifacts:
   objects:
     location: "gs://${PROJECT_ID}-cicd-reports/${BUILD_ID}/pr"
