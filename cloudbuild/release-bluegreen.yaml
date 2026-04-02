@@ -167,6 +167,19 @@ steps:
         gsutil ls gs://${PROJECT_ID}-cicd-reports || \
         gsutil mb -l us-central1 gs://${PROJECT_ID}-cicd-reports
 
+  - name: gcr.io/google.com/cloudsdktool/cloud-sdk:slim
+    id: ensure-reports-exist
+    entrypoint: sh
+    args:
+      - "-c"
+      - |
+        set -e
+        mkdir -p /tmp/reports
+        if [ -z "$(ls -A /tmp/reports 2>/dev/null)" ]; then
+          echo "No reports generated; creating placeholder file"
+          echo "No security reports generated for this build." > /tmp/reports/README.txt
+        fi
+
 artifacts:
   objects:
     location: "gs://${PROJECT_ID}-cicd-reports/${BUILD_ID}/release"
