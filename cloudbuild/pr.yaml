@@ -26,6 +26,7 @@ steps:
   - name: "owasp/dependency-check:12.2.0"
     id: "sca"
     entrypoint: "sh"
+    user: "root"
     secretEnv:
       - NVD_API_KEY
     args:
@@ -34,8 +35,6 @@ steps:
         set -e
         mkdir -p /workspace/reports/dependency-check
         mkdir -p /workspace/odc-data
-        # mkdir -p /tmp/reports/dependency-check
-        # mkdir -p /tmp/odc-data
 
         # If cache is present, use PR-safe mode: no updates (fast + stable)
         # '--noupdate' disables automatic updating of NVD-CVE and other hosted sources. [1](https://dependency-check.github.io/DependencyCheck/dependency-check-cli/arguments.html)
