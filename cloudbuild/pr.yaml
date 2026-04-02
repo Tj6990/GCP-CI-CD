@@ -32,9 +32,9 @@ steps:
       - "-c"
       - |
         set -e
+        chmod -R 777 /workspace/reports /workspace/odc-data
         mkdir -p /workspace/reports/dependency-check
         mkdir -p /workspace/odc-data
-        chmod -R 777 /workspace/reports /workspace/odc-data
 
         # If cache is present, use PR-safe mode: no updates (fast + stable)
         # '--noupdate' disables automatic updating of NVD-CVE and other hosted sources. [1](https://dependency-check.github.io/DependencyCheck/dependency-check-cli/arguments.html)
