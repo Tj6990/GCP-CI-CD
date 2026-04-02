@@ -1,7 +1,3 @@
-: "${_SERVICE:?_SERVICE is required (from trigger)}"
-: "${_REGION:?_REGION is required (from trigger)}"
-: "${_AR_REPO:?_AR_REPO is required (from trigger)}"
-
 options:
   logging: CLOUD_LOGGING_ONLY
 
@@ -19,6 +15,14 @@ steps:
       - -c
       - |
         set -e
+
+        : "${_SERVICE:?_SERVICE is required (from trigger)}"
+        : "${_REGION:?_REGION is required (from trigger)}"
+        : "${_AR_REPO:?_AR_REPO is required (from trigger)}"
+        : "${_CLUSTER:?_CLUSTER is required (from trigger)}"
+        : "${_CLUSTER_REGION:?_CLUSTER_REGION is required (from trigger)}"
+        : "${_NAMESPACE:?_NAMESPACE is required (from trigger)}"
+
         mkdir -p /workspace/reports/dependency-check
         mkdir -p /workspace/odc-data
         chmod -R 777 /workspace/reports /workspace/odc-data
