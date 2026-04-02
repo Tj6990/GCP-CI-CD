@@ -23,7 +23,7 @@ steps:
         gsutil -m rsync -r gs://$PROJECT_ID-odc-cache /tmp/odc-data || true
 
   # --- OWASP Dependency-Check (PR-safe) ---
-  - name: "owasp/dependency-check:latest"
+  - name: "owasp/dependency-check:12.2.0"
     id: "sca"
     entrypoint: "sh"
     secretEnv:
