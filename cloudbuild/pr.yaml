@@ -127,5 +127,5 @@ artifacts:
   objects:
     location: "gs://${PROJECT_ID}-cicd-reports/${BUILD_ID}/pr"
     paths:
-      - "reports/*"
-      - "reports/*/*"
+      - "reports/README.txt"
+      - "reports/dependency-check/*.json"
