@@ -112,20 +112,27 @@ steps:
       - -c
       - |
         set -euo pipefail
-        APP="${_SERVICE}"
-        NAMESPACE="${_NAMESPACE}"
-        IMAGE="${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_AR_REPO}/${_SERVICE}:${SHORT_SHA}"
 
         gcloud container clusters get-credentials "${_CLUSTER}" --region "${_CLUSTER_REGION}"
 
-        ACTIVE_COLOR=$(kubectl -n "${NAMESPACE}" get svc "${APP}" -o jsonpath='{.spec.selector.color}' || echo blue)
-        [ "${ACTIVE_COLOR}" = "blue" ] && INACTIVE_COLOR="green" || INACTIVE_COLOR="blue"
+        # Determine active color from service selector
+        ACTIVE_COLOR=$(kubectl -n "${_NAMESPACE}" get svc "${_SERVICE}" -o jsonpath='{.spec.selector.color}' 2>/dev/null || echo blue)
 
-        kubectl -n "${NAMESPACE}" set image deployment/${APP}-${INACTIVE_COLOR} app="${IMAGE}"
-        kubectl -n "${NAMESPACE}" rollout status deployment/${APP}-${INACTIVE_COLOR} --timeout=5m
+        if [ "$${ACTIVE_COLOR}" = "blue" ]; then
+          INACTIVE_COLOR="green"
+        else
+          INACTIVE_COLOR="blue"
+        fi
 
-        kubectl -n "${NAMESPACE}" patch svc "${APP}" \
-          -p '{"spec":{"selector":{"app":"'"${APP}"'","color":"'"${INACTIVE_COLOR}"'"}}}'
+        IMAGE="${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_AR_REPO}/${_SERVICE}:${SHORT_SHA}"
+
+        kubectl -n "${_NAMESPACE}" set image deployment/${_SERVICE}-$${INACTIVE_COLOR} app="$${IMAGE}"
+        kubectl -n "${_NAMESPACE}" rollout status deployment/${_SERVICE}-$${INACTIVE_COLOR} --timeout=5m
+
+        kubectl -n "${_NAMESPACE}" patch svc "${_SERVICE}" \
+          -p '{"spec":{"selector":{"app":"'"${_SERVICE}"'","color":"'"$${INACTIVE_COLOR}"'"}}}'
+
+        echo "Blue/Green cutover complete. Rollback = switch selector back to $${ACTIVE_COLOR}."
 
   # 10) Ensure README exists
   - name: gcr.io/google.com/cloudsdktool/cloud-sdk:slim
@@ -137,7 +144,7 @@ steps:
         set -e
         if [ ! -f /workspace/reports/README.txt ]; then
           echo "No security reports generated for this build." > /workspace/reports/README.txt
-          echo "{}" > /workspace/reports//dependency-check/README.json
+          echo "{}" > /workspace/reports/dependency-check/README.json
         fi
 
 artifacts:
@@ -146,7 +153,6 @@ artifacts:
     paths:
       - "reports/README.txt"
       - "reports/dependency-check/*.json"
-
 
 images:
   - "${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_AR_REPO}/${_SERVICE}:${SHORT_SHA}"
