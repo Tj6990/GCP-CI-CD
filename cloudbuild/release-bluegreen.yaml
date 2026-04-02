@@ -137,13 +137,16 @@ steps:
         set -e
         if [ ! -f /workspace/reports/README.txt ]; then
           echo "No security reports generated for this build." > /workspace/reports/README.txt
+          echo "{}" > /workspace/reports//dependency-check/README.json
         fi
 
 artifacts:
   objects:
     location: "gs://${PROJECT_ID}-cicd-reports/${BUILD_ID}/release"
     paths:
-      - "reports/*"
+      - "reports/README.txt"
+      - "reports/dependency-check/*.json"
+
 
 images:
   - "${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_AR_REPO}/${_SERVICE}:${SHORT_SHA}"

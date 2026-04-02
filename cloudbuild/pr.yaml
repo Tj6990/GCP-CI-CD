@@ -121,10 +121,12 @@ steps:
         if [ ! -f /workspace/reports/README.txt ]; then
           echo "Creating placeholder report README.txt"
           echo "No security reports generated for this build." > /workspace/reports/README.txt
+          echo "{}" > /workspace/reports//dependency-check/README.json
         fi
 
 artifacts:
   objects:
     location: "gs://${PROJECT_ID}-cicd-reports/${BUILD_ID}/pr"
     paths:
-      - "reports/*"
+      - "reports/README.txt"
+      - "reports/dependency-check/*.json"
