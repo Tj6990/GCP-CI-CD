@@ -1,0 +1,132 @@
+options:
+  logging: CLOUD_LOGGING_ONLY
+
+substitutions:
+  _SERVICE: "sample-api"
+
+availableSecrets:
+  secretManager:
+    - versionName: projects/340263268846/secrets/nvd-api-key/versions/latest
+      env: NVD_API_KEY
+
+steps:
+  # 0) Prepare /workspace directories with root-capable image
+  - name: gcr.io/google.com/cloudsdktool/cloud-sdk:slim
+    id: prepare-workspace
+    entrypoint: sh
+    args:
+      - -c
+      - |
+        set -e
+        mkdir -p /workspace/reports/dependency-check
+        mkdir -p /workspace/odc-data
+        chmod -R 777 /workspace/reports /workspace/odc-data
+
+  # 1) Restore Dependency-Check cache from GCS -> /workspace/odc-data
+  - name: gcr.io/google.com/cloudsdktool/cloud-sdk:slim
+    id: restore-odc-cache
+    entrypoint: sh
+    args:
+      - -c
+      - |
+        set -e
+        echo "Restoring ODC cache (if exists) from gs://$PROJECT_ID-odc-cache ..."
+        gsutil -m rsync -r gs://$PROJECT_ID-odc-cache /workspace/odc-data || true
+
+  # 2) OWASP Dependency-Check (PR-safe)
+  - name: "owasp/dependency-check:12.2.0"
+    id: sca
+    entrypoint: sh
+    secretEnv:
+      - NVD_API_KEY
+    args:
+      - -c
+      - |
+        set -e
+
+        # Cache present -> PR safe scan without NVD updates
+        if [ "$(ls -A /workspace/odc-data 2>/dev/null | wc -l)" -gt 0 ]; then
+          echo "ODC cache detected. Running PR scan with --noupdate."
+          /usr/share/dependency-check/bin/dependency-check.sh \
+            --project "${_SERVICE}" \
+            --scan /workspace \
+            --format JSON \
+            --out /workspace/reports/dependency-check \
+            --noupdate
+        else
+          # Bootstrap once (best effort) using NVD API key (won't fail PR if NVD flakes)
+          echo "ODC cache NOT found. Bootstrapping once (best-effort)."
+          echo "NVD_API_KEY length = $${#NVD_API_KEY}"
+          /usr/share/dependency-check/bin/dependency-check.sh \
+            --project "${_SERVICE}" \
+            --scan /workspace \
+            --format JSON \
+            --out /workspace/reports/dependency-check \
+            --nvdApiKey "$$NVD_API_KEY" || true
+        fi
+
+        # Ensure at least one file exists for artifacts upload
+        if [ -z "$(ls -A /workspace/reports 2>/dev/null)" ]; then
+          echo "No reports generated; creating placeholder file"
+          echo "No security reports generated for this build." > /workspace/reports/README.txt
+        fi
+
+  # 3) Save cache back to GCS (so next PR is fast)
+  - name: gcr.io/google.com/cloudsdktool/cloud-sdk:slim
+    id: save-odc-cache
+    entrypoint: sh
+    args:
+      - -c
+      - |
+        set -e
+        echo "Saving ODC cache to gs://$PROJECT_ID-odc-cache ..."
+        gsutil -m rsync -r /workspace/odc-data gs://$PROJECT_ID-odc-cache || true
+
+  # 4) Secret scan
+  - name: "zricethezav/gitleaks:v8.18.4"
+    id: secret-scan
+    entrypoint: sh
+    args:
+      - -c
+      - |
+        gitleaks detect --source . --no-git --verbose
+
+  # 5) K8s policy
+  - name: "openpolicyagent/conftest:v0.46.0"
+    id: k8s-policy
+    entrypoint: sh
+    args:
+      - -c
+      - |
+        conftest test k8s --policy policies/conftest
+
+  # 6) Ensure report bucket exists
+  - name: gcr.io/google.com/cloudsdktool/cloud-sdk:slim
+    id: ensure-report-bucket
+    entrypoint: sh
+    args:
+      - -c
+      - |
+        gsutil ls gs://${PROJECT_ID}-cicd-reports || \
+        gsutil mb -l us-central1 gs://${PROJECT_ID}-cicd-reports
+
+  - name: gcr.io/google.com/cloudsdktool/cloud-sdk:slim
+    id: ensure-reports-exist
+    entrypoint: sh
+    args:
+      - "-c"
+      - |
+        set -e
+        mkdir -p /workspace/reports
+        if [ ! -f /workspace/reports/README.txt ]; then
+          echo "Creating placeholder report README.txt"
+          echo "No security reports generated for this build." > /workspace/reports/README.txt
+          echo "{}" > /workspace/reports//dependency-check/README.json
+        fi
+
+artifacts:
+  objects:
+    location: "gs://${PROJECT_ID}-cicd-reports/${BUILD_ID}/pr"
+    paths:
+      - "reports/README.txt"
+      - "reports/dependency-check/*.json"

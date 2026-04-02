@@ -1,0 +1,45 @@
+options:
+  logging: CLOUD_LOGGING_ONLY
+
+availableSecrets:
+  secretManager:
+    - versionName: projects/340263268846/secrets/nvd-api-key/versions/latest
+      env: NVD_API_KEY
+
+steps:
+  - name: "gcr.io/google.com/cloudsdktool/cloud-sdk:slim"
+    id: "restore-odc-cache"
+    entrypoint: "sh"
+    args:
+      - "-c"
+      - |
+        set -e
+        mkdir -p /tmp/odc-data
+        gsutil -m rsync -r gs://$PROJECT_ID-odc-cache /tmp/odc-data || true
+
+  # Run a lightweight scan to force DB update into /tmp/odc-data
+  - name: "owasp/dependency-check:12.2.0"
+    id: "refresh-nvd"
+    entrypoint: "sh"
+    secretEnv: ["NVD_API_KEY"]
+    args:
+      - "-c"
+      - |
+        set -e
+        mkdir -p /tmp/odc-data /tmp/empty-scan /tmp/reports
+        /usr/share/dependency-check/bin/dependency-check.sh \
+          --project "nvd-cache-refresh" \
+          --scan /tmp/empty-scan \
+          --format JSON \
+          --out /tmp/reports \
+          --data /tmp/odc-data \
+          --nvdApiKey "$$NVD_API_KEY"
+
+  - name: "gcr.io/google.com/cloudsdktool/cloud-sdk:slim"
+    id: "save-odc-cache"
+    entrypoint: "sh"
+    args:
+      - "-c"
+      - |
+        set -e
+        gsutil -m rsync -r /tmp/odc-data gs://$PROJECT_ID-odc-cache

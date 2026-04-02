@@ -1,0 +1,6 @@
+
+resources:
+  - deployment-blue.yaml
+  - deployment-green.yaml
+  - service-active.yaml
+  - service-preview.yaml
