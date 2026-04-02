@@ -1,15 +1,9 @@
+: "${_SERVICE:?_SERVICE is required (from trigger)}"
+: "${_REGION:?_REGION is required (from trigger)}"
+: "${_AR_REPO:?_AR_REPO is required (from trigger)}"
+
 options:
   logging: CLOUD_LOGGING_ONLY
-
-substitutions:
-  _SERVICE: "sample-api"
-  _REGION: "us-central1"
-  _AR_REPO: "my-ar-repo"
-  _CLUSTER: "my-gke-cluster"
-  _CLUSTER_REGION: "us-central1"
-  _NAMESPACE: "dev"
-  _REPLICAS: "2"
-  _FAIL_ON_CVSS: "7"
 
 availableSecrets:
   secretManager:
@@ -17,174 +11,135 @@ availableSecrets:
       env: NVD_API_KEY
 
 steps:
-  # 1) Build & unit tests
-  - name: "maven:3.9-eclipse-temurin-17"
-    id: "build-test"
-    entrypoint: "sh"
-    args:
-      - "-c"
-      - |
-        mvn -B clean test
-
-  # 2) SAST (STRICT) - fail build on ERROR findings
-  - name: "returntocorp/semgrep:1.66.0"
-    id: "sast"
-    entrypoint: "sh"
-    args:
-      - "-c"
-      - |
-        semgrep --config=p/java --severity=ERROR .
-
-  # 3) Restore Dependency-Check NVD cache (recommended for CI stability)
-  - name: "gcr.io/google.com/cloudsdktool/cloud-sdk:slim"
-    id: "restore-odc-cache"
-    entrypoint: "sh"
-    args:
-      - "-c"
-      - |
-        set -e
-        mkdir -p /tmp/odc-data
-        gsutil -m rsync -r gs://$PROJECT_ID-odc-cache /tmp/odc-data || true
-
-  # 4) SCA (STRICT) - fail build if CVSS >= threshold
-  - name: "owasp/dependency-check:12.2.0"
-    id: "sca"
-    entrypoint: "sh"
-    secretEnv:
-      - NVD_API_KEY
-    args:
-      - "-c"
-      - |
-        set -e
-        mkdir -p /tmp/reports/dependency-check
-        mkdir -p /tmp/odc-data
-
-        /usr/share/dependency-check/bin/dependency-check.sh \
-          --project "${_SERVICE}" \
-          --scan /workspace \
-          --format JSON \
-          --out /tmp/reports/dependency-check \
-          --data /tmp/odc-data \
-          --nvdApiKey "$$NVD_API_KEY" \
-          --failOnCVSS "${_FAIL_ON_CVSS}"
-
-  # 5) Save updated cache back to GCS
-  - name: "gcr.io/google.com/cloudsdktool/cloud-sdk:slim"
-    id: "save-odc-cache"
-    entrypoint: "sh"
-    args:
-      - "-c"
-      - |
-        set -e
-        gsutil -m rsync -r /tmp/odc-data gs://$PROJECT_ID-odc-cache
-
-  # 6) Secret scan (STRICT) - fails build on leaks
-  - name: "zricethezav/gitleaks:v8.18.4"
-    id: "secret-scan"
-    entrypoint: "sh"
-    args:
-      - "-c"
-      - |
-        gitleaks detect --source . --no-git --verbose
-
-  # 7) Policy-as-code for K8s (STRICT)
-  - name: "openpolicyagent/conftest:v0.46.0"
-    id: "k8s-policy"
-    entrypoint: "sh"
-    args:
-      - "-c"
-      - |
-        conftest test k8s --policy policies/conftest
-
-  # 8) Build container image
-  - name: "gcr.io/cloud-builders/docker"
-    id: "docker-build"
-    args:
-      - "build"
-      - "-t"
-      - "${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_AR_REPO}/${_SERVICE}:${SHORT_SHA}"
-      - "."
-
-  # 9) Push image
-  - name: "gcr.io/cloud-builders/docker"
-    id: "push"
-    args:
-      - "push"
-      - "${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_AR_REPO}/${_SERVICE}:${SHORT_SHA}"
-
-  # 10) Blue/Green deploy (inactive -> preview smoke test -> cutover)
-  - name: "gcr.io/google.com/cloudsdktool/cloud-sdk:slim"
-    id: "bluegreen-deploy"
-    entrypoint: "sh"
-    args:
-      - "-c"
-      - |
-        set -euo pipefail
-
-        APP="${_SERVICE}"
-        NS="${_NAMESPACE}"
-        CLUSTER="${_CLUSTER}"
-        LOC="${_CLUSTER_REGION}"
-        IMAGE="${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_AR_REPO}/${_SERVICE}:${SHORT_SHA}"
-        REPLICAS="${_REPLICAS}"
-
-        gcloud container clusters get-credentials "${CLUSTER}" --region "${LOC}"
-
-        kubectl get ns "${NS}" >/dev/null 2>&1 || kubectl create ns "${NS}"
-        kubectl -n "${NS}" apply -f k8s/base
-
-        ACTIVE_COLOR=$(kubectl -n "${NS}" get svc "${APP}" -o jsonpath='{.spec.selector.color}' 2>/dev/null || echo blue)
-        if [ "${ACTIVE_COLOR}" = "blue" ]; then
-          INACTIVE_COLOR="green"
-        else
-          INACTIVE_COLOR="blue"
-        fi
-
-        kubectl -n "${NS}" set image deployment/${APP}-${INACTIVE_COLOR} app="${IMAGE}"
-        kubectl -n "${NS}" scale deployment/${APP}-${INACTIVE_COLOR} --replicas="${REPLICAS}"
-        kubectl -n "${NS}" rollout status deployment/${APP}-${INACTIVE_COLOR} --timeout=5m
-
-        kubectl -n "${NS}" patch svc "${APP}-preview" \
-          -p '{"spec":{"selector":{"app":"'"${APP}"'","color":"'"${INACTIVE_COLOR}"'"}}}'
-
-        # Smoke test on preview
-        kubectl -n "${NS}" run smoke-${BUILD_ID} --rm -i --restart=Never \
-          --image=curlimages/curl:8.6.0 \
-          -- curl -fsS "http://${APP}-preview/actuator/health" | grep -q 'UP'
-
-        # Cutover
-        kubectl -n "${NS}" patch svc "${APP}" \
-          -p '{"spec":{"selector":{"app":"'"${APP}"'","color":"'"${INACTIVE_COLOR}"'"}}}'
-
-        echo "Blue/Green cutover complete. Rollback = switch selector back to ${ACTIVE_COLOR}."
-
+  # 0) Prepare /workspace
   - name: gcr.io/google.com/cloudsdktool/cloud-sdk:slim
-    id: ensure-report-bucket
+    id: prepare-workspace
     entrypoint: sh
     args:
       - -c
       - |
-        gsutil ls gs://${PROJECT_ID}-cicd-reports || \
-        gsutil mb -l us-central1 gs://${PROJECT_ID}-cicd-reports
+        set -e
+        mkdir -p /workspace/reports/dependency-check
+        mkdir -p /workspace/odc-data
+        chmod -R 777 /workspace/reports /workspace/odc-data
 
+  # 1) Build & test
+  - name: maven:3.9-eclipse-temurin-17
+    id: build-test
+    entrypoint: sh
+    args: ["-c", "mvn -B clean test"]
+
+  # 2) SAST (STRICT)
+  - name: returntocorp/semgrep:1.66.0
+    id: sast
+    entrypoint: sh
+    args: ["-c", "semgrep --config=p/java --severity=ERROR ."]
+
+  # 3) Restore NVD cache
+  - name: gcr.io/google.com/cloudsdktool/cloud-sdk:slim
+    id: restore-odc-cache
+    entrypoint: sh
+    args:
+      - -c
+      - |
+        set -e
+        gsutil -m rsync -r gs://${PROJECT_ID}-odc-cache /workspace/odc-data || true
+
+  # 4) SCA (STRICT)
+  - name: owasp/dependency-check:12.2.0
+    id: sca
+    entrypoint: sh
+    secretEnv: ["NVD_API_KEY"]
+    args:
+      - -c
+      - |
+        set -e
+        /usr/share/dependency-check/bin/dependency-check.sh \
+          --project "${_SERVICE}" \
+          --scan /workspace \
+          --format JSON \
+          --out /workspace/reports/dependency-check \
+          --data /workspace/odc-data \
+          --nvdApiKey "$$NVD_API_KEY" \
+          --failOnCVSS "${_FAIL_ON_CVSS}"
+
+  # 5) Save updated cache
+  - name: gcr.io/google.com/cloudsdktool/cloud-sdk:slim
+    id: save-odc-cache
+    entrypoint: sh
+    args:
+      - -c
+      - |
+        set -e
+        gsutil -m rsync -r /workspace/odc-data gs://${PROJECT_ID}-odc-cache
+
+  # 6) Secret scan
+  - name: zricethezav/gitleaks:v8.18.4
+    id: secret-scan
+    entrypoint: sh
+    args: ["-c", "gitleaks detect --source . --no-git --verbose"]
+
+  # 7) K8s policy
+  - name: openpolicyagent/conftest:v0.46.0
+    id: k8s-policy
+    entrypoint: sh
+    args: ["-c", "conftest test k8s --policy policies/conftest"]
+
+  # 8) Build & push image
+  - name: gcr.io/cloud-builders/docker
+    id: docker-build
+    args:
+      - build
+      - -t
+      - "${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_AR_REPO}/${_SERVICE}:${SHORT_SHA}"
+      - .
+
+  - name: gcr.io/cloud-builders/docker
+    id: push
+    args:
+      - push
+      - "${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_AR_REPO}/${_SERVICE}:${SHORT_SHA}"
+
+  # 9) Blue/Green deploy
+  - name: gcr.io/google.com/cloudsdktool/cloud-sdk:slim
+    id: bluegreen-deploy
+    entrypoint: sh
+    args:
+      - -c
+      - |
+        set -euo pipefail
+        APP="${_SERVICE}"
+        NS="${_NAMESPACE}"
+        IMAGE="${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_AR_REPO}/${_SERVICE}:${SHORT_SHA}"
+
+        gcloud container clusters get-credentials "${_CLUSTER}" --region "${_CLUSTER_REGION}"
+
+        ACTIVE_COLOR=$(kubectl -n "${NS}" get svc "${APP}" -o jsonpath='{.spec.selector.color}' || echo blue)
+        [ "${ACTIVE_COLOR}" = "blue" ] && INACTIVE_COLOR="green" || INACTIVE_COLOR="blue"
+
+        kubectl -n "${NS}" set image deployment/${APP}-${INACTIVE_COLOR} app="${IMAGE}"
+        kubectl -n "${NS}" rollout status deployment/${APP}-${INACTIVE_COLOR} --timeout=5m
+
+        kubectl -n "${NS}" patch svc "${APP}" \
+          -p '{"spec":{"selector":{"app":"'"${APP}"'","color":"'"${INACTIVE_COLOR}"'"}}}'
+
+  # 10) Ensure README exists
   - name: gcr.io/google.com/cloudsdktool/cloud-sdk:slim
     id: ensure-reports-exist
     entrypoint: sh
     args:
-      - "-c"
+      - -c
       - |
         set -e
-        mkdir -p /tmp/reports
-        if [ -z "$(ls -A /tmp/reports 2>/dev/null)" ]; then
-          echo "No reports generated; creating placeholder file"
-          echo "No security reports generated for this build." > /tmp/reports/README.txt
+        if [ ! -f /workspace/reports/README.txt ]; then
+          echo "No security reports generated for this build." > /workspace/reports/README.txt
         fi
 
 artifacts:
   objects:
     location: "gs://${PROJECT_ID}-cicd-reports/${BUILD_ID}/release"
     paths:
-      - "/tmp/reports/*"
+      - "reports/*"
 
 images:
   - "${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_AR_REPO}/${_SERVICE}:${SHORT_SHA}"
