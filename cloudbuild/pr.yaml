@@ -118,8 +118,8 @@ steps:
       - |
         set -e
         mkdir -p /workspace/reports
-        if [ -z "$(ls -A /workspace/reports 2>/dev/null)" ]; then
-          echo "No reports generated; creating placeholder file"
+        if [ ! -f /workspace/reports/README.txt ]; then
+          echo "Creating placeholder report README.txt"
           echo "No security reports generated for this build." > /workspace/reports/README.txt
         fi
 
